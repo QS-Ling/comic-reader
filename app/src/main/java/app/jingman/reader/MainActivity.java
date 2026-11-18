@@ -22,7 +22,8 @@ public class MainActivity extends Activity {
     final ArrayList<String> paths = new ArrayList<>(), names = new ArrayList<>();
     QimanChapters qimanChapters;
     String readingPath="";
-    LinearLayout root, bar; TextView heading, status; WebView web;
+    LinearLayout root, bar, readerTop; TextView heading, status; WebView web;
+    boolean readerControlsVisible=true, readerAutoHidden=false; float readerTouchX,readerTouchY; boolean readerMoved; long readerTouchTime;
     ReaderUi ui;FrameLayout contentHost;boolean mineView;
     android.content.SharedPreferences prefs;
     LibraryStore library;
@@ -63,6 +64,7 @@ public class MainActivity extends Activity {
             java.util.Iterator<String> keys=saved.keys();while(keys.hasNext()){String key=keys.next();String url=Sources.normalize(key);if(Sources.isComic(url))knownBooks.put(url,saved.getString(key));}
         } catch(Exception ignored) {}
         if(!openIntent(getIntent()))browse(home(),false,QIMAN_HOME_REFRESH.claimStartup());
+        checkUpdates(false);
     }
     boolean openIntent(Intent intent){
         if(intent==null||!Intent.ACTION_VIEW.equals(intent.getAction())||intent.getData()==null)return false;
@@ -80,6 +82,7 @@ public class MainActivity extends Activity {
         TextView b=ui.action(s,false,action);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(42),1);lp.setMargins(dp(4),dp(3),dp(4),dp(3));parent.addView(b,lp);
     }
     void baseScreen() {
+        getWindow().getDecorView().setSystemUiVisibility(0);
         covers.cancelRequests();
         if(chapterCounts!=null)chapterCounts.cancelRequests();combinedSearch=null;homeRefreshFrame=null;
         if(web != null) { web.stopLoading(); web.clearCache(true); web.destroy(); web = null; }
@@ -93,7 +96,7 @@ public class MainActivity extends Activity {
         baseScreen();LinearLayout top=ui.row();top.setPadding(dp(8),0,dp(8),0);
         top.addView(ui.iconButton("back","返回",this::onBackPressed),new LinearLayout.LayoutParams(dp(42),dp(48)));
         heading=ui.text(subtitle,17,ui.text,true);heading.setSingleLine(true);heading.setEllipsize(android.text.TextUtils.TruncateAt.END);top.addView(heading,new LinearLayout.LayoutParams(0,dp(48),1));heading.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(ui.iconButton("more","更多",this::screenMenu),new LinearLayout.LayoutParams(dp(42),dp(48)));root.addView(top);
+        top.addView(ui.iconButton("more","更多",this::screenMenu),new LinearLayout.LayoutParams(dp(42),dp(48)));root.addView(top);readerTop=top;
         status=ui.text("",11,ui.muted,false);status.setPadding(dp(20),dp(2),dp(20),dp(8));status.setMaxLines(2);root.addView(status);
     }
 
@@ -372,6 +375,7 @@ public class MainActivity extends Activity {
         addMenu(body,"source","内容来源",Sources.name(home()),this::chooseSource);
         addMenu(body,"moon","外观",dark?"深色模式":"浅色模式",()->{dark=!dark;prefs.edit().putBoolean("dark",dark).apply();showMine();});
         addMenu(body,"link","打开漫画链接","支持包子漫画与奇漫屋",this::changeBook);
+        addMenu(body,"source","检查更新","当前版本 "+appVersion(),()->checkUpdates(true));
         TextView note=ui.text("静漫 "+appVersion()+"\n书架与阅读记录仅保存在本机",11,ui.muted,false);note.setGravity(Gravity.CENTER);note.setLineSpacing(dp(5),1);note.setPadding(0,dp(25),0,dp(10));body.addView(note);
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));addNavigation("我的");
     }
@@ -512,9 +516,20 @@ public class MainActivity extends Activity {
         final java.util.concurrent.atomic.AtomicBoolean switchingEntry=new java.util.concurrent.atomic.AtomicBoolean();
         final String cacheTitle=title+" · "+names.get(index);
         prefs.edit().putString(book+"/chapter",path).apply();
-        frame(names.get(index)); status.setText("正在加载漫画…");
+        frame(names.get(index)); readerControlsVisible=true;readerAutoHidden=false; status.setText("正在加载漫画…");
         web=new WebView(this); WebView reader=web;
         web.setBackgroundColor(bg());
+        web.setOnScrollChangeListener((v,x,y,oldX,oldY)->checkReaderThreshold(reader,token));
+        web.setOnTouchListener((v,event)->{
+            if(event.getActionMasked()==MotionEvent.ACTION_DOWN){readerTouchX=event.getX();readerTouchY=event.getY();readerTouchTime=event.getEventTime();readerMoved=false;}
+            else if(event.getActionMasked()==MotionEvent.ACTION_MOVE){if(Math.abs(event.getX()-readerTouchX)>dp(10)||Math.abs(event.getY()-readerTouchY)>dp(10)||event.getPointerCount()>1)readerMoved=true;}
+            else if(event.getActionMasked()==MotionEvent.ACTION_POINTER_DOWN)readerMoved=true;
+            else if(event.getActionMasked()==MotionEvent.ACTION_UP&&!readerMoved&&event.getEventTime()-readerTouchTime<500){
+                float x=event.getX()/reader.getScale(),y=event.getY()/reader.getScale();
+                reader.evaluateJavascript("(function(){var e=document.elementFromPoint("+x+","+y+");return !!(e&&e.closest('button,a,input'));})()",result->{if(token==generation&&"false".equals(result))setReaderControls(!readerControlsVisible);});
+            }
+            return false;
+        });
         WebSettings settings=web.getSettings(); settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true);
         settings.setUserAgentString(ImageLoader.USER_AGENT);
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
@@ -557,7 +572,8 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView v,String url) {
                 if(token!=generation) return;
-                status.setText("上下滑动阅读 · 加载失败可点重试");
+                status.setText("上下滑动阅读 · 轻点屏幕切换菜单");
+                pollReaderThreshold(v,token);
             }
         });
         root.addView(web,new LinearLayout.LayoutParams(-1,0,1));
@@ -593,6 +609,45 @@ public class MainActivity extends Activity {
             +"<div id='notice'>正在加载图片…</div><ul id='images'></ul>"
             +"<script>var tpl_path='/template/pc/14/',params='"+data+"';window.readerImageUrl=function(value){return value;};window.onerror=function(){document.getElementById('notice').textContent='图片加载失败，请返回后重试。';};</script>"
             +"<script src='/__reader/jquery.js'></script><script src='/__reader/crypto.js'></script><script src='/__reader/reader.js'></script><script src='/__reader/pic.js'></script></body></html>";
+    }
+    void setReaderControls(boolean visible){
+        if(chapter<0||web==null)return;readerControlsVisible=visible;
+        readerTop.setVisibility(visible?View.VISIBLE:View.GONE);status.setVisibility(visible?View.VISIBLE:View.GONE);bar.setVisibility(visible?View.VISIBLE:View.GONE);
+        int flags=visible?0:View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+        if(visible&&!dark){flags|=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;if(Build.VERSION.SDK_INT>=26)flags|=View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;}
+        getWindow().getDecorView().setSystemUiVisibility(flags);
+    }
+    void pollReaderThreshold(WebView reader,int token){
+        if(token!=generation||readerAutoHidden||destroyed)return;checkReaderThreshold(reader,token);
+        reader.postDelayed(()->pollReaderThreshold(reader,token),700);
+    }
+    void checkReaderThreshold(WebView reader,int token){
+        if(readerAutoHidden||token!=generation)return;
+        reader.evaluateJavascript("typeof window.readerPastSecond === 'function' && window.readerPastSecond()",value->{
+            if(token==generation&&!readerAutoHidden&&"true".equals(value)){readerAutoHidden=true;setReaderControls(false);}
+        });
+    }
+    void checkUpdates(boolean manual){
+        if(manual)Toast.makeText(this,"正在检查更新…",Toast.LENGTH_SHORT).show();
+        worker.execute(()->{
+            try{
+                HttpURLConnection c=(HttpURLConnection)new URL("https://api.github.com/repos/QS-Ling/comic-reader/releases/latest").openConnection();
+                c.setConnectTimeout(10000);c.setReadTimeout(10000);c.setRequestProperty("Accept","application/vnd.github+json");c.setRequestProperty("User-Agent","Jingman-Android");
+                StringBuilder data=new StringBuilder();try(BufferedReader in=new BufferedReader(new InputStreamReader(c.getInputStream(),"UTF-8"))){char[] b=new char[4096];int n;while((n=in.read(b))!=-1){data.append(b,0,n);if(data.length()>1000000)throw new IOException("更新信息过大");}}finally{c.disconnect();}
+                org.json.JSONObject release=new org.json.JSONObject(data.toString());String version=release.optString("tag_name","");
+                if(!version.matches("[vV]?[0-9]+(\\.[0-9]+)*"))throw new IOException("版本号格式不受支持");
+                if(compareVersions(version,appVersion())<=0){if(manual)runOnUiThread(()->{if(!destroyed)Toast.makeText(this,"当前已是最新版本",Toast.LENGTH_SHORT).show();});return;}
+                String link=release.optString("html_url","");org.json.JSONArray assets=release.optJSONArray("assets");
+                if(assets!=null)for(int i=0;i<assets.length();i++){org.json.JSONObject a=assets.optJSONObject(i);if(a!=null&&a.optString("name").toLowerCase(Locale.ROOT).endsWith(".apk")){String candidate=a.optString("browser_download_url");if(candidate.startsWith("https://github.com/QS-Ling/comic-reader/releases/download/")){link=candidate;break;}}}
+                if(!link.startsWith("https://github.com/QS-Ling/comic-reader/releases/"))throw new IOException("更新链接无效");
+                final String target=link,notes=release.optString("body","").trim();
+                runOnUiThread(()->{if(!destroyed&&!isFinishing())dialog().setTitle("发现新版本 "+version).setMessage(notes.isEmpty()?"有新版本可供下载。":notes.length()>1500?notes.substring(0,1500)+"…":notes).setPositiveButton("打开下载",(d,w)->{try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(target)));}catch(ActivityNotFoundException e){Toast.makeText(this,"没有可用的浏览器",Toast.LENGTH_SHORT).show();}}).setNegativeButton("稍后",null).show();});
+            }catch(Exception e){if(manual)runOnUiThread(()->{if(!destroyed)Toast.makeText(this,"检查更新失败，请稍后重试",Toast.LENGTH_LONG).show();});}
+        });
+    }
+    static int compareVersions(String a,String b){
+        String[] x=a.replaceFirst("^[vV]","").split("\\."),y=b.replaceFirst("^[vV]","").split("\\.");
+        for(int i=0;i<Math.max(x.length,y.length);i++){java.math.BigInteger m=new java.math.BigInteger(i<x.length?x[i]:"0"),n=new java.math.BigInteger(i<y.length?y[i]:"0");int c=m.compareTo(n);if(c!=0)return c;}return 0;
     }
     void save() {
         if(web!=null && chapter>=0 && chapter<paths.size()) prefs.edit().putInt(book+readingPath+"/y",web.getScrollY()).apply();

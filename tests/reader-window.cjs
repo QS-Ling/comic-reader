@@ -20,6 +20,8 @@ function scenario(resume,windowed=false){
     flush();assert.equal(pending.length,windowed?3:6,'parallel load limit');
     if(resume!==undefined)assert.equal(requests[0],'page-'+resume,'resume loads target first');
     settle();assert.ok(max<=(windowed?3:6));
+    if(resume!==undefined)assert.equal(ctx.window.readerPastSecond(),true,'restored later page enters fullscreen');
+    else {assert.equal(ctx.window.readerPastSecond(),false,'first page keeps controls');events.pointerdown();y=2100;assert.equal(ctx.window.readerPastSecond(),true,'passing the second page triggers fullscreen');y=0;}
     if(windowed){
         assert.ok(requests.length<=10,'long chapters must not eagerly load a half chapter');
         events.pointerdown();y=60000;events.scroll();settle();

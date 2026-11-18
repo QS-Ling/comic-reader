@@ -12,6 +12,7 @@ window.readerStart = (params,decryptImage) => {
         li.appendChild(img);container.appendChild(li);
         return {li,img,url:window.readerImageUrl(value),state:'idle',blob:null,height:0};
     });
+    window.readerPastSecond=()=>pages.length>2 && ((position && !touched && position.page>=2) || (pages[0].loadedOnce && pages[1].loadedOnce && pages[1].li.getBoundingClientRect().bottom<=0));
     function focus(){if(position&&!touched)return position.page;const i=pages.findIndex(p=>p.li.getBoundingClientRect().bottom>0);return i<0?pages.length-1:i;}
     function align(){if(position&&!touched){const r=pages[position.page].li.getBoundingClientRect();scrollTo(0,scrollY+r.top+r.height*Math.max(0,Math.min(1,position.ratio)));}}
     function schedule(){if(scheduled||disposed)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;pump();});}

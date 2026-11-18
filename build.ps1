@@ -24,7 +24,7 @@ if (!(Test-Path build/r8.jar)) {
 }
 & "$Jdk\bin\java.exe" -cp build/r8.jar com.android.tools.r8.D8 --lib $androidJar --min-api 24 --output build/dex build/classes.jar
 Check
-& "$bt\aapt.exe" package -f -M app/src/main/AndroidManifest.xml -I $androidJar -S app/src/main/res -A app/src/main/assets -F build/unsigned.apk --min-sdk-version 24 --target-sdk-version 34 --version-code 20 --version-name 0.4.10
+& "$bt\aapt.exe" package -f -M app/src/main/AndroidManifest.xml -I $androidJar -S app/src/main/res -A app/src/main/assets -F build/unsigned.apk --min-sdk-version 24 --target-sdk-version 34 --version-code 21 --version-name 0.4.11
 Check
 Copy-Item build/dex/classes.dex build/classes.dex -Force
 Push-Location build
@@ -37,8 +37,8 @@ if (!(Test-Path build/debug.keystore)) {
     & "$Jdk\bin\keytool.exe" -genkeypair -keystore build/debug.keystore -storepass android -keypass android -alias androiddebugkey -dname 'CN=Jingman Debug' -keyalg RSA -keysize 2048 -validity 10000
     Check
 }
-& "$bt\apksigner.bat" sign --ks build/debug.keystore --ks-pass pass:android --key-pass pass:android --out dist/jingman-0.4.10.apk build/aligned.apk
+& "$bt\apksigner.bat" sign --ks build/debug.keystore --ks-pass pass:android --key-pass pass:android --out dist/jingman-0.4.11.apk build/aligned.apk
 Check
-& "$bt\apksigner.bat" verify --verbose dist/jingman-0.4.10.apk
+& "$bt\apksigner.bat" verify --verbose dist/jingman-0.4.11.apk
 Check
-Write-Host "APK: $PSScriptRoot\dist\jingman-0.4.10.apk"
+Write-Host "APK: $PSScriptRoot\dist\jingman-0.4.11.apk"
