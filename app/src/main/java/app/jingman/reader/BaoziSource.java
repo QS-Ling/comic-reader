@@ -75,7 +75,6 @@ public final class BaoziSource {
             return u.toASCIIString();
         }catch(Exception e){return "";}
     }
-    private static String safeHtml(String s){return s.replaceAll("(?is)<(script|style)\\b[^>]*>.*?</\\1>","").replaceAll("(?s)<!--.*?-->","");}
     public static String cover(String html){
         Matcher meta=Pattern.compile("(?is)<meta\\b([^>]*)>").matcher(html);
         while(meta.find())if("og:image".equals(SiteIndex.attribute(meta.group(1),"name"))||"og:image".equals(SiteIndex.attribute(meta.group(1),"property"))){String url=imageUrl(SiteIndex.attribute(meta.group(1),"content"),true);if(!url.isEmpty())return url;}
@@ -84,13 +83,40 @@ public final class BaoziSource {
         return "";
     }
     public static SiteIndex.Page parse(String html,String base) {
-        SiteIndex.Page page=new SiteIndex.Page();String safe=safeHtml(html),body=safe;
-        String section=URI.create(base).getFragment();
-        if(section!=null){
-            Matcher sections=Pattern.compile("(?is)<div\\b[^>]*id=\"nav-([^\"]+)-box\"[^>]*>").matcher(safe);int start=-1,end=safe.length();
-            while(sections.find()){if(start>=0){end=sections.start();break;}if(section.equals(sections.group(1)))start=sections.end();}
-            body=start<0?"":safe.substring(start,end);
+        SiteIndex.Page page=new SiteIndex.Page();
+        String safe=SiteIndex.safeHtml(html);
+        URI uri=URI.create(base);
+        String section=uri.getFragment();
+        page.books.addAll(parseCards(section==null?safe:homeSection(safe,section)));
+        if(uri.getPath().endsWith("/homepage")){
+            if(section==null)HomeRecommendations.prioritize(page,Arrays.asList(
+                parseCards(homeSection(safe,"hot")),
+                parseCards(homeSection(safe,"index_cn_recommend")),
+                parseCards(homeSection(safe,"index_kr_recommend")),
+                parseCards(homeSection(safe,"index_jp_recommend"))));
+            Matcher tabs=Pattern.compile("(?is)<li\\b[^>]*aria-controls=\"nav-([^\"]+)-box\"[^>]*>(.*?)</li>").matcher(safe);
+            while(tabs.find())page.filters.add(new SiteIndex.Entry(HOME+"#"+tabs.group(1),SiteIndex.text(tabs.group(2))));
         }
+        if(uri.getPath().endsWith("/classify")){
+            Matcher filters=Pattern.compile("(?is)onclick=\"handle_change_filters\\(this, '([^']+)', '([^']+)'\\)\"[^>]*>\\s*([^<]+)").matcher(safe);
+            while(filters.find()){
+                String key=filters.group(1),value=filters.group(2),label=SiteIndex.text(filters.group(3));
+                if(!Arrays.asList("region","state","type","filter").contains(key))continue;
+                String group=key.equals("region")?"地区":key.equals("state")?"状态":key.equals("type")?"题材":"首字母";
+                page.filters.add(new SiteIndex.Entry(withQuery(withQuery(base,key,value),"page","1"),group+" · "+label));
+            }
+        }
+        if(uri.getPath().endsWith("/classify")||uri.getPath().endsWith("/search")){
+            int number=1;try{number=Integer.parseInt(query(base,"page","1"));}catch(Exception ignored){}
+            if(number>1)page.previous=withQuery(base,"page",String.valueOf(number-1));
+            if(!page.books.isEmpty())page.next=withQuery(base,"page",String.valueOf(number+1));
+        }
+        return page;
+    }
+    private static String homeSection(String html,String section) {
+        return SiteIndex.divContent(html,"id","nav-"+section+"-box");
+    }
+    private static List<SiteIndex.Entry> parseCards(String body) {
         Matcher clicks=Pattern.compile("(?is)<(?:div|a)\\b([^>]*onclick=\"([^\"]*)\"[^>]*)>").matcher(body);
         ArrayList<String[]> cards=new ArrayList<>();ArrayList<Integer> ends=new ArrayList<>(),starts=new ArrayList<>();
         while(clicks.find()){Matcher id=Pattern.compile("\\['comic',\\s*'([A-Za-z0-9_-]+)'\\]").matcher(SiteIndex.decode(clicks.group(2)));if(id.find()){cards.add(new String[]{id.group(1),clicks.group(1)});starts.add(clicks.start());ends.add(clicks.end());}}
@@ -101,26 +127,7 @@ public final class BaoziSource {
             SiteIndex.Entry old=books.get(url);if(old!=null&&!old.cover.isEmpty())preview=old.cover;
             books.put(url,new SiteIndex.Entry(url,title,3,preview));
         }
-        page.books.addAll(books.values());
-        if(URI.create(base).getPath().endsWith("/homepage")){
-            Matcher tabs=Pattern.compile("(?is)<li\\b[^>]*aria-controls=\"nav-([^\"]+)-box\"[^>]*>(.*?)</li>").matcher(safe);
-            while(tabs.find())page.filters.add(new SiteIndex.Entry(HOME+"#"+tabs.group(1),SiteIndex.text(tabs.group(2))));
-        }
-        if(URI.create(base).getPath().endsWith("/classify")){
-            Matcher filters=Pattern.compile("(?is)onclick=\"handle_change_filters\\(this, '([^']+)', '([^']+)'\\)\"[^>]*>\\s*([^<]+)").matcher(safe);
-            while(filters.find()){
-                String key=filters.group(1),value=filters.group(2),label=SiteIndex.text(filters.group(3));
-                if(!Arrays.asList("region","state","type","filter").contains(key))continue;
-                String group=key.equals("region")?"地区":key.equals("state")?"状态":key.equals("type")?"题材":"首字母";
-                page.filters.add(new SiteIndex.Entry(withQuery(withQuery(base,key,value),"page","1"),group+" · "+label));
-            }
-        }
-        if(URI.create(base).getPath().endsWith("/classify")||URI.create(base).getPath().endsWith("/search")){
-            int number=1;try{number=Integer.parseInt(query(base,"page","1"));}catch(Exception ignored){}
-            if(number>1)page.previous=withQuery(base,"page",String.valueOf(number-1));
-            if(!page.books.isEmpty())page.next=withQuery(base,"page",String.valueOf(number+1));
-        }
-        return page;
+        return new ArrayList<>(books.values());
     }
     public static String query(String url,String key,String fallback){try{String q=URI.create(url).getRawQuery();if(q!=null)for(String pair:q.split("&")){String[] kv=pair.split("=",2);if(URLDecoder.decode(kv[0],"UTF-8").equals(key))return kv.length>1?URLDecoder.decode(kv[1],"UTF-8"):"";}}catch(Exception ignored){}return fallback;}
     public static String withQuery(String url,String key,String value){
@@ -133,7 +140,7 @@ public final class BaoziSource {
         public final ArrayList<String> paths=new ArrayList<>(),names=new ArrayList<>();
     }
     public static Detail detail(String html,String base)throws IOException{
-        Detail d=new Detail();String safe=safeHtml(html);d.cover=cover(safe);
+        Detail d=new Detail();String safe=SiteIndex.safeHtml(html);d.cover=cover(safe);
         Matcher title=Pattern.compile("(?is)<h1\\b[^>]*>(.*?)</h1>").matcher(safe);if(title.find())d.title=SiteIndex.text(title.group(1));
         Matcher author=Pattern.compile("(?is)<h2\\b[^>]*class=\"[^\"]*comics-detail__author[^\"]*\"[^>]*>(.*?)</h2>").matcher(safe);if(author.find())d.author=SiteIndex.text(author.group(1));
         Matcher meta=Pattern.compile("(?is)<meta\\b([^>]*)>").matcher(safe);while(meta.find())if("description".equals(SiteIndex.attribute(meta.group(1),"name"))){d.summary=SiteIndex.attribute(meta.group(1),"content").replace("\\n","\n");break;}
@@ -147,7 +154,7 @@ public final class BaoziSource {
         if(d.paths.isEmpty())throw new IOException("源站没有返回可阅读章节");return d;
     }
     public static ArrayList<String> images(String html)throws IOException{
-        String safe=safeHtml(html);ArrayList<String> out=new ArrayList<>();Matcher m=Pattern.compile("(?is)<img\\b([^>]*)>").matcher(safe);
+        String safe=SiteIndex.safeHtml(html);ArrayList<String> out=new ArrayList<>();Matcher m=Pattern.compile("(?is)<img\\b([^>]*)>").matcher(safe);
         while(m.find()){
             String attrs=m.group(1);if(!Arrays.asList(SiteIndex.attribute(attrs,"class").split("\\s+")).contains("comic-contain__item"))continue;
             String image=imageUrl(SiteIndex.attribute(attrs,"data-src"),false);if(!image.isEmpty()){image=image.replace(".com/scomic/",".com/w640/scomic/");if(!out.contains(image))out.add(image);}

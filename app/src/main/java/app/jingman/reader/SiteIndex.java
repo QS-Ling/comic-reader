@@ -7,6 +7,7 @@ import java.util.regex.*;
 /** Extract plain navigation data; never execute the site's HTML or scripts. */
 public final class SiteIndex {
     public static final String ORIGIN="https://www.qimanwu.app";
+    private static final Pattern DIV_TAG=Pattern.compile("(?is)<(/?)div\\b((?:\"[^\"]*\"|'[^']*'|[^'\"<>]++)*+)>");
     public static String normalize(String input) {
         try {
             String s=input.trim();
@@ -82,9 +83,44 @@ public final class SiteIndex {
         Matcher end=Pattern.compile("(?is)<div\\b[^>]*class=[\"'][^\"']*\\bchapterList\\b[^\"']*[\"']").matcher(body);
         return imageCover(end.find()?body.substring(0,end.start()):body,base);
     }
+    static String safeHtml(String html) {
+        return html.replaceAll("(?is)<(script|style)\\b[^>]*>.*?</\\1>","").replaceAll("(?s)<!--.*?-->","");
+    }
+    static String divContent(String html,String key,String value) {
+        Matcher tags=DIV_TAG.matcher(html);
+        int start=0,depth=0;
+        while(tags.find()) {
+            if(depth==0) {
+                if(!tags.group(1).isEmpty())continue;
+                String attr=attribute(tags.group(2),key);
+                if(key.equals("class")?!Arrays.asList(attr.split("\\s+")).contains(value):!attr.equals(value))continue;
+                start=tags.end();
+                depth=1;
+            } else if(tags.group(1).isEmpty()) {
+                depth++;
+            } else if(--depth==0) {
+                return html.substring(start,tags.start());
+            }
+        }
+        return "";
+    }
+    public static Page parseHome(String html,String base) {
+        String safe=safeHtml(html);
+        Page page=parseListing(safe,base);
+        String completed=divContent(divContent(safe,"class","topic_1"),"class","leftBar");
+        String newlyAdded=divContent(safe,"class","topic_2");
+        HomeRecommendations.prioritize(page,Arrays.asList(
+            parseListing(divContent(safe,"class","original"),base).books,
+            parseListing(divContent(safe,"class","series"),base).books,
+            parseListing(completed,base).books,
+            parseListing(newlyAdded,base).books));
+        return page;
+    }
     public static Page parse(String html,String base) {
+        return parseListing(safeHtml(html),base);
+    }
+    private static Page parseListing(String safe,String base) {
         Page page=new Page();
-        String safe=html.replaceAll("(?is)<(script|style)\\b[^>]*>.*?</\\1>","").replaceAll("(?s)<!--.*?-->","");
         Matcher main=Pattern.compile("<div\\b[^>]*class=[\"'][^\"']*\\b(?:mainSearch|searchResult|mainForm|banner)\\b[^\"']*[\"']",Pattern.CASE_INSENSITIVE).matcher(safe);
         String body=main.find()?safe.substring(main.start()):safe;
         LinkedHashMap<String,Entry> books=new LinkedHashMap<>(),filters=new LinkedHashMap<>();

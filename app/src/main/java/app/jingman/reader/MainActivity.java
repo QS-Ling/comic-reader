@@ -172,11 +172,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams searchLp=new LinearLayout.LayoutParams(-1,dp(42));searchLp.setMargins(dp(20),dp(4),dp(20),dp(8));root.addView(search,searchLp);
         input.setOnEditorActionListener((v,action,event)->{if(action==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH){submit.run();return true;}return false;});
         HorizontalScrollView channels=new HorizontalScrollView(this);channels.setHorizontalScrollBarEnabled(false);LinearLayout tabs=ui.row();tabs.setPadding(dp(16),0,dp(16),0);channels.addView(tabs);
-        String[] labels=Sources.baozi(url)?new String[]{"精选","热门","国漫","韩漫","日漫","分类"}:new String[]{"精选","更新","排行","分类"};
-        String[] destinations=Sources.baozi(url)?new String[]{home(),BaoziSource.HOME+"#hot",BaoziSource.HOME+"#index_cn_recommend",BaoziSource.HOME+"#index_kr_recommend",BaoziSource.HOME+"#index_jp_recommend",Sources.category(url)}:new String[]{home(),ORIGIN+"/custom/update",ORIGIN+"/custom/top",Sources.category(url)};
+        String[] labels=Sources.baozi(url)?new String[]{"精选","热门","国漫","韩漫","日漫","热血","分类"}:new String[]{"精选","更新","排行","分类"};
+        String[] destinations=Sources.baozi(url)?new String[]{home(),BaoziSource.HOME+"#hot",BaoziSource.HOME+"#index_cn_recommend",BaoziSource.HOME+"#index_kr_recommend",BaoziSource.HOME+"#index_jp_recommend",BaoziSource.HOME+"#index_rx_recommend",Sources.category(url)}:new String[]{home(),ORIGIN+"/custom/update",ORIGIN+"/custom/top",Sources.category(url)};
         for(int i=0;i<labels.length;i++){final String destination=destinations[i];boolean selected=url.equals(destination)||(labels[i].equals("分类")&&(url.contains("/classify")||url.contains("/category")));TextView tab=ui.chip(labels[i],selected,()->browse(destination,true));tab.setTextSize(14);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(34));lp.setMargins(dp(2),dp(3),dp(2),dp(3));tabs.addView(tab,lp);if(selected)channels.post(()->channels.smoothScrollTo(Math.max(0,tab.getLeft()-dp(16)),0));}
         root.addView(channels,new LinearLayout.LayoutParams(-1,dp(42)));
-        LinearLayout section=ui.row();section.setPadding(dp(20),dp(7),dp(12),dp(2));heading=ui.text("精选漫画",18,ui.text,true);section.addView(heading,new LinearLayout.LayoutParams(0,dp(30),1));heading.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout section=ui.row();section.setPadding(dp(20),dp(7),dp(12),dp(2));heading=ui.text("首页推荐",18,ui.text,true);section.addView(heading,new LinearLayout.LayoutParams(0,dp(30),1));heading.setGravity(Gravity.CENTER_VERTICAL);
         boolean category=url.contains("/classify")||url.contains("/category");boolean qimanSearching=!Sources.baozi(url)&&SiteIndex.isSearch(url);TextView accessory=ui.chip(category?"筛选  ›":qimanSearching?"更新书目":"刷新",false,category?this::showSiteFilters:qimanSearching?()->refreshQimanIndex(url):isQimanHome(url)?this::refreshQimanHome:()->browse(url,false));section.addView(accessory,new LinearLayout.LayoutParams(-2,dp(32)));root.addView(section);
         status=ui.text("正在加载书目…",11,ui.muted,false);status.setPadding(dp(20),dp(2),dp(20),dp(9));status.setMaxLines(2);root.addView(status);
         contentHost=new FrameLayout(this);root.addView(contentHost,new LinearLayout.LayoutParams(-1,0,1));showLoading(contentHost);addNavigation("发现");
@@ -189,7 +189,7 @@ public class MainActivity extends Activity {
             boolean category=url.contains("/classify")||url.contains("/category");
             for(SiteIndex.Entry entry:page.books)knownBooks.put(entry.url,entry.title);while(knownBooks.size()>1000)knownBooks.remove(knownBooks.keySet().iterator().next());prefs.edit().putString("knownBooks",new org.json.JSONObject(knownBooks).toString()).apply();
             boolean searching=Uri.parse(url).getPath().startsWith("/search/")||Uri.parse(url).getPath().endsWith("/search");
-            siteFilters.addAll(page.filters);heading.setText(searching?"搜索结果":url.contains("#hot")?"热门漫画":url.contains("#index_cn")?"国漫精选":url.contains("#index_kr")?"韩漫精选":url.contains("#index_jp")?"日漫精选":category?"漫画分类":url.contains("/custom/update")?"最近更新":url.contains("/custom/top")?"人气排行":"精选漫画");
+            siteFilters.addAll(page.filters);heading.setText(searching?"搜索结果":url.contains("#hot")?"热门漫画":url.contains("#index_cn")?"国漫精选":url.contains("#index_kr")?"韩漫精选":url.contains("#index_jp")?"日漫精选":url.contains("#index_rx")?"热血精选":category?"漫画分类":url.contains("/custom/update")?"最近更新":url.contains("/custom/top")?"人气排行":"首页推荐");
             status.setText(browseStatus(page));
             if(page.books.isEmpty()){boolean emptyQuery=page.indexSearch&&SiteIndex.searchQuery(url).trim().isEmpty();showState(contentHost,emptyQuery?"输入漫画名开始搜索":"暂时没有找到漫画",page.indexSearch?"已收录 "+page.indexedBooks+" 部，可离线搜书名；点右上角更新书目扫描官网分类":"试试其他关键词，或到分类里找找",()->browse(Sources.category(url),true));return;}
             ComicGrid grid=new ComicGrid(this,page.books,covers,dark,page.previous,page.next,browseGridPage,new ComicGrid.Actions(){public void open(SiteIndex.Entry entry){openSiteLink(entry.url);}public void preview(SiteIndex.Entry entry){previewBook(entry);}public void sourcePage(String address){browse(address,true);}public void pageChanged(int index){browseGridPage=index;}},searching?chapterCounts:null,!isQimanHome(url));
@@ -233,7 +233,7 @@ public class MainActivity extends Activity {
             if(!sync)return;
             try{
                 if(destroyed||token!=generation)return;
-                SiteIndex.Page live=SiteIndex.parse(fetchPassive(url),url);if(live.books.isEmpty())throw new IOException("官网首页未返回书目");
+                SiteIndex.Page live=SiteIndex.parseHome(fetchPassive(url),url);if(live.books.isEmpty())throw new IOException("官网首页未返回书目");
                 try{QimanSearchIndex known=qimanIndex();for(int i=0;i<live.books.size();i++){SiteIndex.Entry e=live.books.get(i),match=known.find(e.url);if(e.cover.isEmpty()&&match!=null&&!match.cover.isEmpty())live.books.set(i,new SiteIndex.Entry(e.url,e.title,3,match.cover));}}catch(IOException ignored){}
                 try{saveQimanHome(live);}catch(IOException storage){live.sourceNote="官网已更新，本机未能保存首页";}
                 runOnUiThread(()->{if(destroyed||token!=generation)return;if(QimanHomeCache.sameBooks(saved,live))status.setText(browseStatus(live));else renderBrowsePage(url,live,token);});
